@@ -40,6 +40,7 @@ SIGINT or SIGKILL will stop both JackTrip instances.
         --client-cmd /usr/local/bin/jack_connect Music\ Player\ Daemon:right JackTrip:send_2 \
         --user ahihi \
         --host 10.0.0.9
+    Password:
     Server is ready
     Client is ready
     Server commands finished
