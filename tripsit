@@ -1,0 +1,161 @@
+#!/usr/bin/expect -f
+proc llastindex {l} {
+    return [expr [llength $l] - 1]
+}
+
+proc try_close {sid} {
+    catch {close -i $sid}
+}
+
+proc usage {} {
+    puts stderr {Usage: tripsit
+    [--verbose]
+    [--server-jacktrip COMMAND]
+    [--client-jacktrip COMMAND]
+    [--server-cmd COMMAND [--server-cmd COMMAND ...]]
+    [--client-cmd COMMAND [--client-cmd COMMAND ...]]
+    [--user USERNAME]
+    [--port PORT]
+    --host HOST}
+}
+
+set args(server_jacktrip) [list jacktrip]
+set args(client_jacktrip) [list jacktrip]
+set args(server_rc) [list]
+set args(client_rc) [list]
+set args(user) [exec whoami]
+set args(host) {}
+set args(port) 22
+set args(verbose) 0
+set key {}
+foreach arg $argv {
+    switch $arg {
+        --server-jacktrip {
+            set key server_jacktrip
+            set args($key) [list]
+        }
+        --client-jacktrip {
+            set key client_jacktrip
+            set args($key) [list]
+        }
+        --server-cmd {
+            set key server_rc
+            lappend args($key) {}
+        }
+        --client-cmd {
+            set key client_rc
+            lappend args($key) {}
+        }
+        --user {
+            set key user
+            set args($key) {}
+        }
+        --host {
+            set key host
+            set args($key) {}
+        }
+        --port {
+            set key port
+            set args($key) {}
+        }
+        --verbose {
+            set key {}
+            set args(verbose) 1
+        }
+        default {
+            if {$key == {}} {
+                usage
+                exit 1
+            }
+            if {$key in {server_rc client_rc}} {
+                set i [llastindex $args($key)]
+                lset args($key) $i [concat [lindex $args($key) $i] [list $arg]]
+            } else {
+                lappend args($key) $arg
+            }
+        }
+    }
+}
+
+if {$args(server_jacktrip) == {} || $args(client_jacktrip) == {} || $args(user) == {} || $args(host) == {} || $args(port) == {}} {
+    usage
+    exit 1
+}
+
+if {! $args(verbose)} {
+    log_user 0
+}
+set timeout -1
+eval [concat spawn -noecho ssh -t -l $args(user) -p $args(port) $args(host) $args(server_jacktrip) --server]
+set sid(server) $spawn_id
+set password {}
+expect {
+    -nocase password*: {
+        stty -echo
+        if {! $args(verbose)} {
+            send_user "Password:"
+        }
+        expect_user -re "(.*)\n"
+        set password $expect_out(1,string)
+        send "$password\n"
+        send_user "\n"
+        stty echo
+        exp_continue
+    }
+    "\nWaiting for Connection From Client..." {
+        puts "Server is ready"
+    }
+    eof {
+        puts "EOF from server"
+        exit 2
+    }
+}
+
+eval [concat spawn -noecho $args(client_jacktrip) --client $args(host)]
+set sid(client) $spawn_id
+expect {
+    "\nReceived Connection for Peer!" {
+        puts "Client is ready"
+    }
+    eof {
+        puts "EOF from client"
+        try_close $sid(server)
+        exit 2
+    }
+}
+
+eval [concat spawn -noecho ssh -t -l $args(user) -p $args(port) $args(host) [join $args(server_rc) { \; }]]
+expect {
+    -nocase password*: {
+        send "$password\n"
+        exp_continue
+    }
+    eof {
+        puts "Server commands finished"
+    }
+}
+set password {}
+
+foreach command $args(client_rc) {
+    set output [eval [concat exec $command]]
+    if $args(verbose) {
+        puts $output
+    }
+}
+puts "Client commands finished"
+
+trap {
+    try_close $sid(client)
+    try_close $sid(server)
+    exit 2
+} {SIGINT SIGTERM}
+expect {
+    -i $sid(server) eof {
+        try_close $sid(client)
+        exit 2
+    }
+    -i $sid(client) eof {
+        try_close $sid(server)
+        exit 2
+    }
+}
