@@ -45,7 +45,3 @@ SIGINT or SIGKILL will stop both JackTrip instances.
     Client is ready
     Server commands finished
     Client commands finished
-
-## License
-
-Public domain.
